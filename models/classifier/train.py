@@ -217,6 +217,13 @@ def train_classifier(args) -> int:
         CalibratedClassifier(model), args.output, height=ROI_CROP_SIZE, width=ROI_CROP_SIZE
     )
     print(f"[+] Exported {args.output} ({os.path.getsize(args.output) / 1024:.1f} KB) | parity ok={ok} max_diff={max_diff:.2e}")
+
+    # Maintain backward-compatible copy for legacy consumers
+    legacy_path = os.path.join(os.path.dirname(args.output) or ".", "pathology_classifier.onnx")
+    if os.path.exists(args.output) and os.path.abspath(args.output) != os.path.abspath(legacy_path):
+        import shutil
+        shutil.copyfile(args.output, legacy_path)
+
     return 0 if ok else 1
 
 
@@ -225,7 +232,7 @@ def parse_args():
     p.add_argument("--splits-dir", type=str, default="data/splits")
     p.add_argument("--raw-root", type=str, default="data/raw/kermany")
     p.add_argument("--checkpoint", type=str, default="exports/pathology_classifier_best.pt")
-    p.add_argument("--output", type=str, default="exports/pathology_classifier.onnx")
+    p.add_argument("--output", type=str, default="exports/mobilenet_v3_pathology_classifier.onnx")
     p.add_argument("--epochs", type=int, default=20)
     p.add_argument("--batch-size", type=int, default=64)
     p.add_argument("--lr", type=float, default=1e-3)

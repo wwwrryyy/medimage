@@ -53,7 +53,7 @@ def export_stage1_despeckler(
         width=width,
         in_channels=1,
         input_name="corrupted_frame",
-        output_name="clean_frame",
+        output_name="despeckled_frame",
         dynamic_spatial=True,
     )
     ok, max_diff, num_passed = verify_pytorch_onnx_parity(
@@ -183,12 +183,18 @@ def main():
         results.append(res2)
 
     if args.stage in ("all", "3"):
+        stage3_path = str(exports_dir / "mobilenet_v3_pathology_classifier.onnx")
         res3 = export_stage3_classifier(
             checkpoint=str(exports_dir / "pathology_classifier_best.pt"),
-            output_path=str(exports_dir / "pathology_classifier.onnx"),
+            output_path=stage3_path,
             tolerance=args.tolerance,
         )
         results.append(res3)
+        # Maintain backward-compatible copy for any legacy paths
+        legacy_path = str(exports_dir / "pathology_classifier.onnx")
+        if os.path.exists(stage3_path) and stage3_path != legacy_path:
+            import shutil
+            shutil.copyfile(stage3_path, legacy_path)
 
     print("\n" + "=" * 70)
     print("UNIFIED ONNX EXPORT SUMMARY")

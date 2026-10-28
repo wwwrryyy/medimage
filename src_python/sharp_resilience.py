@@ -14,47 +14,10 @@ import json
 import sqlite3
 import threading
 import time
-from typing import Any, Callable, Dict, Iterator, List, Optional, Protocol, Sequence, Union
-import urllib.request
+from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence
 
 
-FindingTransport = Union[
-    Callable[[List[Dict[str, Any]]], bool],
-    "FindingTransportProtocol",
-]
-
-
-class FindingTransportProtocol(Protocol):
-    """Seam for delivering a batch of unsynchronized findings to a remote sink."""
-
-    def __call__(self, records: List[Dict[str, Any]]) -> bool:
-        ...
-
-
-class HttpJsonFindingTransport:
-    """
-    HTTP POST JSON adapter for FindingTransport.
-    Sends {"findings": [...]} to the configured clinical records endpoint and returns
-    True only on a 2xx HTTP response.
-    """
-
-    def __init__(self, endpoint_url: str, timeout_sec: float = 5.0):
-        self.endpoint_url = endpoint_url
-        self.timeout_sec = float(timeout_sec)
-
-    def __call__(self, records: List[Dict[str, Any]]) -> bool:
-        payload = json.dumps({"findings": records}).encode("utf-8")
-        req = urllib.request.Request(
-            self.endpoint_url,
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=self.timeout_sec) as resp:
-                return 200 <= resp.status < 300
-        except Exception:
-            return False
+FindingTransport = Callable[[List[Dict[str, Any]]], bool]
 
 
 class SHARPOfflineResilienceManager:
@@ -107,21 +70,46 @@ class SHARPOfflineResilienceManager:
                     confidence REAL,
                     mse_score REAL,
                     bbox_json TEXT,
+                    pathology_label TEXT,
+                    pathology_confidence REAL,
+                    pathology_json TEXT,
                     synced INTEGER DEFAULT 0
                 )
                 """
             )
+            # Add columns if upgrading existing table
+            cursor = conn.execute("PRAGMA table_info(anomaly_logs)")
+            columns = {row[1] for row in cursor.fetchall()}
+            if "pathology_label" not in columns:
+                conn.execute("ALTER TABLE anomaly_logs ADD COLUMN pathology_label TEXT")
+            if "pathology_confidence" not in columns:
+                conn.execute("ALTER TABLE anomaly_logs ADD COLUMN pathology_confidence REAL")
+            if "pathology_json" not in columns:
+                conn.execute("ALTER TABLE anomaly_logs ADD COLUMN pathology_json TEXT")
 
     def log_anomaly_offline(self, roi_dict: Dict[str, Any]) -> int:
         """
         Logs an anomaly ROI finding locally into the offline buffer.
-        Returns the inserted row ID.
+        Preserves Stage 3 pathology classification (label, confidence, probability distribution)
+        when present. Returns the inserted row ID.
         """
+        pathology = roi_dict.get("pathology")
+        pathology_label = None
+        pathology_conf = None
+        pathology_json = None
+        if pathology is not None:
+            pathology_label = str(pathology.get("label", ""))
+            pathology_conf = float(pathology.get("confidence", 0.0))
+            pathology_json = json.dumps(pathology)
+
         with self._lock, self._connect() as conn:
             cursor = conn.execute(
                 """
-                INSERT INTO anomaly_logs (timestamp, roi_id, roi_type, confidence, mse_score, bbox_json, synced)
-                VALUES (?, ?, ?, ?, ?, ?, 0)
+                INSERT INTO anomaly_logs (
+                    timestamp, roi_id, roi_type, confidence, mse_score, bbox_json,
+                    pathology_label, pathology_confidence, pathology_json, synced
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
                 """,
                 (
                     time.time(),
@@ -130,6 +118,9 @@ class SHARPOfflineResilienceManager:
                     float(roi_dict["confidence"]),
                     float(roi_dict["score"]),
                     json.dumps(list(roi_dict["bbox"])),
+                    pathology_label,
+                    pathology_conf,
+                    pathology_json,
                 ),
             )
             return int(cursor.lastrowid or 0)
@@ -145,7 +136,8 @@ class SHARPOfflineResilienceManager:
         with self._lock, self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT id, timestamp, roi_id, roi_type, confidence, mse_score, bbox_json, synced
+                SELECT id, timestamp, roi_id, roi_type, confidence, mse_score, bbox_json,
+                       pathology_label, pathology_confidence, pathology_json, synced
                 FROM anomaly_logs
                 ORDER BY id DESC
                 LIMIT ?
@@ -155,18 +147,24 @@ class SHARPOfflineResilienceManager:
 
         logs: List[Dict[str, Any]] = []
         for r in rows:
-            logs.append(
-                {
-                    "log_id": r[0],
-                    "timestamp": time.strftime("%H:%M:%S", time.localtime(r[1])),
-                    "roi_id": r[2],
-                    "type": r[3],
-                    "confidence": r[4],
-                    "mse_score": r[5],
-                    "bbox": json.loads(r[6]),
-                    "synced": bool(r[7]),
+            record: Dict[str, Any] = {
+                "log_id": r[0],
+                "timestamp": time.strftime("%H:%M:%S", time.localtime(r[1])),
+                "roi_id": r[2],
+                "type": r[3],
+                "confidence": r[4],
+                "mse_score": r[5],
+                "bbox": json.loads(r[6]),
+                "synced": bool(r[10]),
+            }
+            if r[9] is not None:
+                record["pathology"] = json.loads(r[9])
+            elif r[7] is not None:
+                record["pathology"] = {
+                    "label": r[7],
+                    "confidence": r[8],
                 }
-            )
+            logs.append(record)
         return logs
 
     def sync_pending(self, batch_limit: int = 100) -> int:
@@ -182,7 +180,8 @@ class SHARPOfflineResilienceManager:
             with self._connect() as conn:
                 rows = conn.execute(
                     """
-                    SELECT id, timestamp, roi_id, roi_type, confidence, mse_score, bbox_json
+                    SELECT id, timestamp, roi_id, roi_type, confidence, mse_score, bbox_json,
+                           pathology_label, pathology_confidence, pathology_json
                     FROM anomaly_logs
                     WHERE synced = 0
                     ORDER BY id ASC
@@ -194,8 +193,9 @@ class SHARPOfflineResilienceManager:
             if not rows:
                 return 0
 
-            records = [
-                {
+            records = []
+            for r in rows:
+                rec: Dict[str, Any] = {
                     "log_id": r[0],
                     "timestamp": r[1],
                     "roi_id": r[2],
@@ -204,8 +204,14 @@ class SHARPOfflineResilienceManager:
                     "mse_score": r[5],
                     "bbox": json.loads(r[6]),
                 }
-                for r in rows
-            ]
+                if r[9] is not None:
+                    rec["pathology"] = json.loads(r[9])
+                elif r[7] is not None:
+                    rec["pathology"] = {
+                        "label": r[7],
+                        "confidence": r[8],
+                    }
+                records.append(rec)
 
             if self.transport is not None:
                 try:

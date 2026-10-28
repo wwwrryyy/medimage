@@ -47,7 +47,7 @@ def export_onnx(args):
         width=args.width,
         in_channels=1,
         input_name="corrupted_frame",
-        output_name="clean_frame",
+        output_name="despeckled_frame",
         dynamic_spatial=True,
         opset_version=args.opset,
     )

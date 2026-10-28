@@ -168,9 +168,12 @@ class ScanSession:
 
         # Stage 3: classify each finding's 64x64 ROI crop (taken from the despeckled frame).
         if self.classifier is not None:
+            enriched_findings: List[Dict[str, Any]] = []
             for finding in findings:
                 crop = crop_roi(despeckled, finding["bbox"])
-                finding["pathology"] = describe_pathology(self.classifier(crop))
+                pathology_info = describe_pathology(self.classifier(crop))
+                enriched_findings.append({**finding, "pathology": pathology_info})
+            findings = enriched_findings
 
         if self.on_finding is not None:
             for finding in findings:

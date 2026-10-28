@@ -135,11 +135,11 @@ class ROIDecisionLogic:
         cleaned_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_OPEN, kernel)
         cleaned_mask = cv2.morphologyEx(cleaned_mask, cv2.MORPH_CLOSE, kernel)
 
-        # 3. Contour Detection & Candidate Extraction
+        # 3. Contour Detection & Finding Extraction
         contours, _ = cv2.findContours(cleaned_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-        candidate_boxes: List[List[int]] = []
-        candidate_scores: List[float] = []
+        finding_boxes: List[List[int]] = []
+        finding_scores: List[float] = []
 
         for cnt in contours:
             area = cv2.contourArea(cnt)
@@ -156,11 +156,11 @@ class ROIDecisionLogic:
                 else:
                     score = float(self.mse_threshold)
 
-                candidate_boxes.append([x, y, w, h])
-                candidate_scores.append(score)
+                finding_boxes.append([x, y, w, h])
+                finding_scores.append(score)
 
         # 4. Apply Spatial Non-Maximum Suppression (NMS)
-        nms_boxes, nms_scores = self.apply_nms(candidate_boxes, candidate_scores)
+        nms_boxes, nms_scores = self.apply_nms(finding_boxes, finding_scores)
 
         # 5. Format anomaly ROI findings
         rois: List[Dict[str, Any]] = []

@@ -38,7 +38,7 @@ def test_calibrated_confidence_is_monotonic_and_anchored_at_half():
     assert softer.calibrate_confidence(0.12) < logic.calibrate_confidence(0.12)
 
 
-def test_nms_suppresses_overlapping_candidate_boxes():
+def test_nms_suppresses_overlapping_finding_boxes():
     logic = ROIDecisionLogic(mse_threshold=0.06, nms_iou_threshold=0.3)
     boxes = [[10, 10, 40, 40], [12, 12, 40, 40], [70, 70, 20, 20]]
     scores = [0.20, 0.35, 0.15]

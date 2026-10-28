@@ -85,8 +85,3 @@ def fit_temperature(
 
     optimizer.step(closure)
     return float(log_t.exp().item())
-
-
-def get_classifier(num_classes: int = NUM_CLASSES, in_channels: int = 1, **kwargs) -> MobileNetV3Classifier:
-    """Factory returning the Stage 3 MobileNetV3 pathology classifier."""
-    return MobileNetV3Classifier(num_classes=num_classes, in_channels=in_channels)
