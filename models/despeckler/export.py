@@ -8,8 +8,12 @@ ONNX Runtime CPU / ARM for embedded point-of-care deployment.
 """
 
 import os
+import sys
 import argparse
 import torch
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src_python"))
+from onnx_model_io import export_pytorch_to_onnx
 
 try:
     from model import ConvUNet
@@ -33,29 +37,19 @@ def export_onnx(args):
     elif args.checkpoint:
         print(f"[!] Warning: checkpoint {args.checkpoint} not found. Exporting initialized architecture.")
 
-    model.eval()
-
-    dummy = torch.randn(1, 1, args.height, args.width, device=device)
     output_path = args.output or os.path.join("exports", "unet_despeckler.onnx")
-
-    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
-
     print(f"[*] Exporting ConvUNet model to ONNX: {output_path}")
 
-    torch.onnx.export(
-        model,
-        dummy,
-        output_path,
-        export_params=True,
+    export_pytorch_to_onnx(
+        model=model,
+        output_path=output_path,
+        height=args.height,
+        width=args.width,
+        in_channels=1,
+        input_name="corrupted_frame",
+        output_name="clean_frame",
+        dynamic_spatial=True,
         opset_version=args.opset,
-        do_constant_folding=True,
-        input_names=["corrupted_frame"],
-        output_names=["clean_frame"],
-        dynamic_axes={
-            "corrupted_frame": {0: "batch_size"},
-            "clean_frame": {0: "batch_size"},
-        },
-        dynamo=False,
     )
 
     size_kb = os.path.getsize(output_path) / 1024

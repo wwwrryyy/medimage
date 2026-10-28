@@ -1,5 +1,4 @@
 #ifndef FRAME_QUEUE_HPP
-#ifndef FRAME_QUEUE_HPP
 #define FRAME_QUEUE_HPP
 
 #include <queue>

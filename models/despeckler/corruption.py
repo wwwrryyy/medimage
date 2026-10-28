@@ -1,10 +1,10 @@
 """
 corruption.py
 =============
-Synthetic SAR speckle corruption pipeline.
+Synthetic ultrasound/OCT speckle corruption pipeline.
 
 Applies multiplicative noise (Rayleigh and Gamma distributions) to clean images
-to simulate battlefield sensor degradation. Produces strict 1:1 paired datasets:
+to simulate clinical ultrasound/OCT speckle. Produces strict 1:1 paired datasets:
 [Corrupted Tensor] -> [Clean Ground-Truth Tensor].
 """
 

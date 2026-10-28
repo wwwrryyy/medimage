@@ -9,11 +9,11 @@ mean edge inference latency against the ≥15 FPS (≤66.6 ms) target.
 
 import os
 import sys
-import time
 import argparse
-import numpy as np
 import torch
-import onnxruntime as ort
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src_python"))
+from onnx_model_io import OnnxImageAdapter, verify_pytorch_onnx_parity
 
 try:
     from model import ConvUNet
@@ -42,55 +42,31 @@ def validate(args):
         print(f"[!] Error: ONNX file not found at {args.onnx}")
         return 1
 
-    session = ort.InferenceSession(args.onnx, providers=["CPUExecutionProvider"])
-    input_name = session.get_inputs()[0].name
-    output_name = session.get_outputs()[0].name
+    adapter = OnnxImageAdapter(args.onnx)
     print(f"[+] Loaded ONNX model: {args.onnx}")
 
     # --- Run Numerical Parity Comparison ---
-    num_passed = 0
-    max_diff_seen = 0.0
-    rng = np.random.default_rng(args.seed)
-
     print(f"[*] Testing PyTorch vs ONNX Runtime numerical equivalence on {args.num_samples} samples...")
-    for i in range(args.num_samples):
-        x_np = rng.random((1, 1, args.height, args.width)).astype(np.float32)
-        x_pt = torch.from_numpy(x_np)
-
-        with torch.no_grad():
-            y_pt = model(x_pt).numpy()
-
-        y_ort = session.run([output_name], {input_name: x_np})[0]
-
-        max_diff = float(np.max(np.abs(y_pt - y_ort)))
-        max_diff_seen = max(max_diff_seen, max_diff)
-
-        if max_diff <= args.tolerance:
-            num_passed += 1
-        else:
-            print(f"    FAIL sample {i}: max_diff={max_diff:.6e} > tolerance={args.tolerance:.0e}")
+    all_passed, max_diff_seen, num_passed = verify_pytorch_onnx_parity(
+        pytorch_model=model,
+        onnx_path=args.onnx,
+        height=args.height,
+        width=args.width,
+        in_channels=1,
+        num_samples=args.num_samples,
+        tolerance=args.tolerance,
+        seed=args.seed,
+    )
 
     print(f"\n[*] Numerical Parity: {num_passed}/{args.num_samples} passed (tolerance={args.tolerance:.0e})")
     print(f"    Max absolute diff: {max_diff_seen:.6e}")
 
     # --- Latency Benchmarking ---
     print(f"[*] Running latency benchmark ({args.benchmark_iters} iterations on CPU)...")
-    bench_input = rng.random((1, 1, args.height, args.width)).astype(np.float32)
-
-    # Warmup
-    for _ in range(5):
-        session.run([output_name], {input_name: bench_input})
-
-    latencies = []
-    for _ in range(args.benchmark_iters):
-        t0 = time.perf_counter()
-        session.run([output_name], {input_name: bench_input})
-        t1 = time.perf_counter()
-        latencies.append((t1 - t0) * 1000.0)
-
-    mean_lat = np.mean(latencies)
-    p95_lat = np.percentile(latencies, 95)
-    fps = 1000.0 / mean_lat
+    stats = adapter.benchmark(height=args.height, width=args.width, iters=args.benchmark_iters)
+    mean_lat = stats["mean_ms"]
+    p95_lat = stats["p95_ms"]
+    fps = stats["fps"]
 
     print(f"[+] ConvUNet ONNX Runtime CPU Latency ({args.height}x{args.width}):")
     print(f"    - Mean: {mean_lat:.2f} ms")
@@ -102,7 +78,7 @@ def validate(args):
     else:
         print(f"    - Status: [WARN] Below 15 FPS on this host.")
 
-    if num_passed == args.num_samples:
+    if all_passed:
         print(f"[+] VALIDATION PASSED for ConvUNet!")
         return 0
     else:

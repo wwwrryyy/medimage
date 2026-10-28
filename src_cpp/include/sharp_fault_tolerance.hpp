@@ -2,49 +2,39 @@
 #define SHARP_FAULT_TOLERANCE_HPP
 
 #include <string>
-#include <chrono>
 #include <atomic>
 
 /**
- * @brief Self-Healing Approximate Resilient Programming (SHARP) Paradigm.
- * Maintains fault-tolerant edge inference under electronic interference, frame drops,
- * atmospheric noise, or hardware thermal throttling.
+ * @brief Self-Healing Approximate Resilient Programming (SHARP) Telemetry Monitor.
+ * Tracks real frame processing latency, ingestion queue pressure, and anomaly MSE
+ * to report current edge health state.
  */
 enum class SystemHealthState {
     NOMINAL,
     DEGRADED_ADAPTIVE,
-    SELF_HEALING,
-    OFFLINE_RESILIENT
+    SELF_HEALING
 };
 
 class SHARPFaultTolerance {
 private:
-    SystemHealthState current_health_;
+    SystemHealthState current_health_{SystemHealthState::NOMINAL};
     std::atomic<float> queue_pressure_{0.0f};
-    std::atomic<float> frame_drop_rate_{0.0f};
     std::atomic<float> current_latency_ms_{0.0f};
-    
-    // Adaptive parameters
-    float target_latency_ms_{33.3f}; // 30 FPS target
-    int scale_factor_{1};            // 1 = Full res, 2 = Half res downscaled for resilience
 
 public:
-    SHARPFaultTolerance() : current_health_(SystemHealthState::NOMINAL) {}
+    SHARPFaultTolerance() = default;
 
     void updateTelemetry(float queue_fill_ratio, float latency_ms, float noise_level) {
         queue_pressure_ = queue_fill_ratio;
         current_latency_ms_ = latency_ms;
 
-        // SHARP Fault-Tolerance Heuristic Logic
-        if (queue_fill_ratio > 0.85f || latency_ms > 50.0f) {
+        // Edge target budget is >=15 FPS (<=66.6 ms/frame)
+        if (queue_fill_ratio > 0.85f || latency_ms > 66.6f) {
             current_health_ = SystemHealthState::SELF_HEALING;
-            scale_factor_ = 2; // Dynamic downscaling to recover frame throughput
         } else if (queue_fill_ratio > 0.60f || latency_ms > 35.0f || noise_level > 0.15f) {
             current_health_ = SystemHealthState::DEGRADED_ADAPTIVE;
-            scale_factor_ = 1;
         } else {
             current_health_ = SystemHealthState::NOMINAL;
-            scale_factor_ = 1;
         }
     }
 
@@ -52,13 +42,12 @@ public:
         switch (current_health_) {
             case SystemHealthState::NOMINAL: return "NOMINAL (100% Edge Efficiency)";
             case SystemHealthState::DEGRADED_ADAPTIVE: return "ADAPTIVE (Noise Suppression Active)";
-            case SystemHealthState::SELF_HEALING: return "SELF-HEALING (Dynamic Resolution Recovery)";
-            case SystemHealthState::OFFLINE_RESILIENT: return "OFFLINE RESILIENT (Local Metadata Buffer)";
+            case SystemHealthState::SELF_HEALING: return "SELF-HEALING (High Queue/Latency Load)";
         }
         return "UNKNOWN";
     }
 
-    int getScaleFactor() const { return scale_factor_; }
+    float getLastLatencyMs() const { return current_latency_ms_.load(); }
     SystemHealthState getHealthState() const { return current_health_; }
 };
 

@@ -29,9 +29,14 @@ import onnxruntime as ort
 from skimage.metrics import peak_signal_noise_ratio as psnr_fn
 from skimage.metrics import structural_similarity as ssim_fn
 
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src_python"))
+from onnx_model_io import OnnxImageAdapter, benchmark_onnx_session
+
 
 def run_onnx_inference(session, img_256: np.ndarray) -> np.ndarray:
-    """Runs single-frame inference on ONNX Runtime session."""
+    """Runs single-frame inference on ONNX Runtime session or OnnxImageAdapter."""
+    if isinstance(session, OnnxImageAdapter):
+        return session(img_256)
     input_name = session.get_inputs()[0].name
     output_name = session.get_outputs()[0].name
     x = img_256[np.newaxis, np.newaxis, :, :].astype(np.float32)
@@ -40,22 +45,8 @@ def run_onnx_inference(session, img_256: np.ndarray) -> np.ndarray:
 
 
 def benchmark_session(session, height=256, width=256, iters=50):
-    input_name = session.get_inputs()[0].name
-    output_name = session.get_outputs()[0].name
-    dummy = np.random.rand(1, 1, height, width).astype(np.float32)
-
-    for _ in range(5):
-        session.run([output_name], {input_name: dummy})
-
-    latencies = []
-    for _ in range(iters):
-        t0 = time.perf_counter()
-        session.run([output_name], {input_name: dummy})
-        latencies.append((time.perf_counter() - t0) * 1000.0)
-
-    mean_ms = float(np.mean(latencies))
-    fps = 1000.0 / mean_ms
-    return mean_ms, fps
+    stats = benchmark_onnx_session(session, height=height, width=width, iters=iters)
+    return stats["mean_ms"], stats["fps"]
 
 
 def evaluate_duke_dataset(duke_dir: Path, cnn_sess):

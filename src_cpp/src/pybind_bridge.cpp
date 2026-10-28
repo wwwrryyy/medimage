@@ -10,15 +10,18 @@
 namespace py = pybind11;
 
 /**
- * Helper functions for Zero-Copy Inter-Process Memory Bridge.
- * Wraps C++ cv::Mat pointers directly inside NumPy ndarray buffer views without memory duplication.
+ * Helper for the Zero-Copy Inter-Process Memory Bridge.
+ * Wraps the pixel buffer of a cv::Mat in a NumPy ndarray without duplicating memory.
+ * The ndarray keeps its own reference to the Mat's buffer (OpenCV reference counting),
+ * so the returned array stays valid and unchanged no matter what the engine does next.
  */
-py::array_t<uint8_t> mat_to_numpy_zerocopy_u8(cv::Mat& mat) {
-    if (mat.empty()) return py::array_t<uint8_t>();
-    
+template <typename T>
+py::array_t<T> mat_to_numpy_zerocopy(const cv::Mat& mat) {
+    if (mat.empty()) return py::array_t<T>();
+
     std::vector<ssize_t> shape;
     std::vector<ssize_t> strides;
-    
+
     if (mat.channels() == 1) {
         shape = { static_cast<ssize_t>(mat.rows), static_cast<ssize_t>(mat.cols) };
         strides = { static_cast<ssize_t>(mat.step[0]), static_cast<ssize_t>(mat.step[1]) };
@@ -26,17 +29,11 @@ py::array_t<uint8_t> mat_to_numpy_zerocopy_u8(cv::Mat& mat) {
         shape = { static_cast<ssize_t>(mat.rows), static_cast<ssize_t>(mat.cols), static_cast<ssize_t>(mat.channels()) };
         strides = { static_cast<ssize_t>(mat.step[0]), static_cast<ssize_t>(mat.step[1]), static_cast<ssize_t>(mat.elemSize1()) };
     }
-    
-    return py::array_t<uint8_t>(shape, strides, mat.data);
-}
 
-py::array_t<float> mat_to_numpy_zerocopy_f32(cv::Mat& mat) {
-    if (mat.empty()) return py::array_t<float>();
-    
-    std::vector<ssize_t> shape = { static_cast<ssize_t>(mat.rows), static_cast<ssize_t>(mat.cols) };
-    std::vector<ssize_t> strides = { static_cast<ssize_t>(mat.step[0]), static_cast<ssize_t>(mat.step[1]) };
-    
-    return py::array_t<float>(shape, strides, reinterpret_cast<float*>(mat.data));
+    // Heap-allocated Mat header shares (and ref-counts) the pixel buffer; freed when the ndarray dies.
+    cv::Mat* holder = new cv::Mat(mat);
+    py::capsule owner(holder, [](void* p) { delete static_cast<cv::Mat*>(p); });
+    return py::array_t<T>(shape, strides, reinterpret_cast<const T*>(holder->data), owner);
 }
 
 cv::Mat numpy_to_mat(py::array_t<uint8_t> input_array) {
@@ -49,30 +46,32 @@ cv::Mat numpy_to_mat(py::array_t<uint8_t> input_array) {
     return cv::Mat(rows, cols, type, buf.ptr).clone();
 }
 
-cv::Mat numpy_float_to_mat(py::array_t<float> input_array) {
+cv::Mat numpy_float_to_mat(py::array_t<float, py::array::c_style | py::array::forcecast> input_array) {
     py::buffer_info buf = input_array.request();
+    if (buf.ndim != 2) {
+        throw py::value_error("expected a 2-D float32 array [H, W]");
+    }
     int rows = static_cast<int>(buf.shape[0]);
     int cols = static_cast<int>(buf.shape[1]);
-    
+
     return cv::Mat(rows, cols, CV_32FC1, buf.ptr).clone();
 }
 
 /**
- * Unified Battlefield Core Engine exposed to Python.
+ * Unified Scan Core Engine exposed to Python.
  */
-class BattlefieldEngine {
+class ScanEngine {
 private:
     VideoIngestor ingestor_;
     AnomalyCalculus anomaly_calc_;
     SHARPFaultTolerance sharp_;
-    
-    cv::Mat current_raw_frame_;
-    cv::Mat current_recon_frame_;
-    cv::Mat current_mse_heatmap_;
-    cv::Mat current_visual_heatmap_;
+
+    uint64_t next_frame_id_{1};
+    uint64_t pending_frame_id_{0};  // 0 = no frame awaiting analysis
+    std::chrono::steady_clock::time_point frame_pop_time_{};
 
 public:
-    BattlefieldEngine() : ingestor_(30), anomaly_calc_(0.08f) {}
+    ScanEngine(float gaussian_sigma = 1.5f) : ingestor_(30), anomaly_calc_(gaussian_sigma) {}
 
     bool startStream(const std::string& source) {
         if (source == "0" || source == "camera") {
@@ -88,38 +87,54 @@ public:
         ingestor_.stop();
     }
 
-    py::tuple processNextFrame(py::array_t<float> recon_input) {
+    /**
+     * Step 1: pop the next raw frame. Returns (has_frame, frame_id, raw_frame).
+     * The caller despeckles and reconstructs THIS frame, then passes frame_id back to
+     * computeAnomaly(), so the heatmap is always computed for the frame it describes.
+     */
+    py::tuple nextFrame() {
         cv::Mat raw;
         bool has_frame = ingestor_.getNextFrame(raw, 20);
         if (!has_frame) {
-            return py::make_tuple(false, py::none(), py::none(), py::none(), 0.0f);
+            return py::make_tuple(false, 0, py::none());
         }
 
-        current_raw_frame_ = raw;
-        
-        // Convert numpy recon tensor input back to Mat if supplied, else use raw frame baseline
-        if (recon_input.size() > 0) {
-            current_recon_frame_ = numpy_float_to_mat(recon_input);
-        } else {
-            current_recon_frame_ = current_raw_frame_.clone();
+        pending_frame_id_ = next_frame_id_++;
+        frame_pop_time_ = std::chrono::steady_clock::now();
+        return py::make_tuple(true, pending_frame_id_, mat_to_numpy_zerocopy<uint8_t>(raw));
+    }
+
+    /**
+     * Step 2: compute the anomaly heatmap between the DESPECKLED frame and its autoencoder
+     * reconstruction (speckle on the raw frame would otherwise cause false positives).
+     * Returns (mse_heatmap, visual_heatmap, mean_mse).
+     */
+    py::tuple computeAnomaly(uint64_t frame_id,
+                             py::array_t<float, py::array::c_style | py::array::forcecast> despeckled,
+                             py::array_t<float, py::array::c_style | py::array::forcecast> recon) {
+        if (pending_frame_id_ == 0 || frame_id != pending_frame_id_) {
+            throw py::value_error("stale or unknown frame_id: call next_frame() and analyse that frame");
         }
 
-        // Compute Pixelwise MSE Heatmap
-        float mean_mse = anomaly_calc_.computePixelwiseMSE(current_raw_frame_, current_recon_frame_, current_mse_heatmap_);
-        
-        // Generate Visual Colormap Heatmap
-        anomaly_calc_.generateVisualHeatmap(current_mse_heatmap_, current_visual_heatmap_, true);
+        cv::Mat despeckled_mat = numpy_float_to_mat(despeckled);
+        cv::Mat recon_mat = numpy_float_to_mat(recon);
 
-        // Telemetry update to SHARP engine
+        // Fresh output buffers per frame: previously returned arrays are never overwritten.
+        cv::Mat mse_heatmap, visual_heatmap;
+        float mean_mse = anomaly_calc_.computePixelwiseMSE(despeckled_mat, recon_mat, mse_heatmap);
+        anomaly_calc_.generateVisualHeatmap(mse_heatmap, visual_heatmap, true);
+
+        // Telemetry update to SHARP engine using real measured frame-to-anomaly latency
+        auto now = std::chrono::steady_clock::now();
+        float latency_ms = std::chrono::duration<float, std::milli>(now - frame_pop_time_).count();
         float queue_fill = static_cast<float>(ingestor_.getQueueSize()) / static_cast<float>(ingestor_.getQueueCapacity());
-        sharp_.updateTelemetry(queue_fill, 15.0f, mean_mse);
+        sharp_.updateTelemetry(queue_fill, latency_ms, mean_mse);
 
-        // Zero-copy array wrapping for Python
-        py::array_t<uint8_t> raw_arr = mat_to_numpy_zerocopy_u8(current_raw_frame_);
-        py::array_t<float> mse_arr = mat_to_numpy_zerocopy_f32(current_mse_heatmap_);
-        py::array_t<uint8_t> visual_arr = mat_to_numpy_zerocopy_u8(current_visual_heatmap_);
+        pending_frame_id_ = 0;  // frame consumed
 
-        return py::make_tuple(true, raw_arr, mse_arr, visual_arr, mean_mse);
+        return py::make_tuple(mat_to_numpy_zerocopy<float>(mse_heatmap),
+                              mat_to_numpy_zerocopy<uint8_t>(visual_heatmap),
+                              mean_mse);
     }
 
     std::string getHealthStatus() const {
@@ -135,20 +150,22 @@ public:
     }
 };
 
-PYBIND11_MODULE(battlefield_core, m) {
-    m.doc() = "C++ Zero-Copy Hardware Ingestion and Anomaly Calculus Core for Battlefield Object Detection";
+PYBIND11_MODULE(scan_core, m) {
+    m.doc() = "C++ Zero-Copy Hardware Ingestion and Anomaly Calculus Core for Medical Imaging Anomaly Detection";
 
-    py::class_<BattlefieldEngine>(m, "BattlefieldEngine")
-        .def(py::init<>())
-        .def("start_stream", &BattlefieldEngine::startStream, py::arg("source"))
-        .def("stop_stream", &BattlefieldEngine::stopStream)
-        .def("process_next_frame", &BattlefieldEngine::processNextFrame)
-        .def("get_health_status", &BattlefieldEngine::getHealthStatus)
-        .def("get_fps", &BattlefieldEngine::getFPS)
-        .def("get_queue_size", &BattlefieldEngine::getQueueSize);
+    py::class_<ScanEngine>(m, "ScanEngine")
+        .def(py::init<float>(), py::arg("gaussian_sigma") = 1.5f)
+        .def("start_stream", &ScanEngine::startStream, py::arg("source"))
+        .def("stop_stream", &ScanEngine::stopStream)
+        .def("next_frame", &ScanEngine::nextFrame)
+        .def("compute_anomaly", &ScanEngine::computeAnomaly,
+             py::arg("frame_id"), py::arg("despeckled"), py::arg("recon"))
+        .def("get_health_status", &ScanEngine::getHealthStatus)
+        .def("get_fps", &ScanEngine::getFPS)
+        .def("get_queue_size", &ScanEngine::getQueueSize);
 
     py::class_<AnomalyCalculus>(m, "AnomalyCalculus")
-        .def(py::init<float, float>(), py::arg("mse_threshold") = 0.08f, py::arg("gaussian_sigma") = 1.5f)
-        .def("set_threshold", &AnomalyCalculus::setThreshold)
-        .def("get_threshold", &AnomalyCalculus::getThreshold);
+        .def(py::init<float>(), py::arg("gaussian_sigma") = 1.5f)
+        .def("set_gaussian_sigma", &AnomalyCalculus::setGaussianSigma)
+        .def("get_gaussian_sigma", &AnomalyCalculus::getGaussianSigma);
 }
