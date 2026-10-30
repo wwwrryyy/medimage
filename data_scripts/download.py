@@ -31,6 +31,10 @@ DUKE_DATASET_URL = (
     "http://people.duke.edu/~sf59/Fang_TMI_2013_Dataset.zip"
 )
 
+DUKE_DME_2015_URL = (
+    "http://www.duke.edu/~sf59/Datasets/2015_BOE_Chiu2.zip"
+)
+
 
 class DownloadProgressBar(tqdm):
     def update_to(self, b=1, bsize=1, tsize=None):
@@ -101,6 +105,7 @@ def main():
     parser = argparse.ArgumentParser(description="Download & unpack medical OCT datasets")
     parser.add_argument("--kermany-only", action="store_true", help="Download only Kermany OCT")
     parser.add_argument("--duke-only", action="store_true", help="Download only Duke SD-OCT")
+    parser.add_argument("--duke-dme", action="store_true", help="Download Duke DME 2015 dataset (Chiu et al., BOE 2015)")
     parser.add_argument("--skip-download", action="store_true", help="Skip download, verify/extract local archives only")
     parser.add_argument("--data-root", type=str, default="data/raw", help="Path to raw data directory")
     args = parser.parse_args()
@@ -108,8 +113,9 @@ def main():
     root = Path(args.data_root).resolve()
     root.mkdir(parents=True, exist_ok=True)
 
-    do_kermany = not args.duke_only
-    do_duke = not args.kermany_only
+    do_kermany = not args.duke_only and not args.duke_dme
+    do_duke = not args.kermany_only and not args.duke_dme
+    do_duke_dme = args.duke_dme
 
     if do_kermany:
         kermany_dest = root / "kermany"
@@ -151,6 +157,18 @@ def main():
                 print(f"[*] You can manually download from: http://people.duke.edu/~sf59/Fang_TMI_2013.htm into {duke_archive}")
         if duke_archive.exists():
             extract_archive(duke_archive, duke_dest)
+
+    if do_duke_dme:
+        dme_dest = root / "duke_dme_2015"
+        dme_archive = root / "2015_BOE_Chiu2.zip"
+        if not dme_archive.exists() and not args.skip_download:
+            try:
+                download_url(DUKE_DME_2015_URL, dme_archive)
+            except Exception as e:
+                print(f"[!] Duke DME download failed ({e}).")
+                print(f"[*] Manual download: {DUKE_DME_2015_URL} into {dme_archive}")
+        if dme_archive.exists():
+            extract_archive(dme_archive, dme_dest)
 
 
 if __name__ == "__main__":
