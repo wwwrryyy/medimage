@@ -89,3 +89,13 @@ family_b_unet_synth_seed42,8d4309f,unet_synth,b,42,val,ece,0.008528244769150078
 family_b_unet_synth_seed42,8d4309f,unet_synth,b,42,test,macro_auroc,0.9813942745978219
 family_b_unet_synth_seed42,8d4309f,unet_synth,b,42,test,ece,0.035521875834092484
 family_b_unet_synth_seed42,8d4309f,unet_synth,b,42,all,params,1521668.0
+family_b_unet_synth_seed43,8e5617f,unet_synth,b,43,val,macro_auroc,0.9980013788652232
+family_b_unet_synth_seed43,8e5617f,unet_synth,b,43,val,ece,0.009687549137123464
+family_b_unet_synth_seed43,8e5617f,unet_synth,b,43,test,macro_auroc,0.9743775957571055
+family_b_unet_synth_seed43,8e5617f,unet_synth,b,43,test,ece,0.036751180095598045
+family_b_unet_synth_seed43,8e5617f,unet_synth,b,43,all,params,1521668.0
+family_b_unet_synth_seed44,8e5617f,unet_synth,b,44,val,macro_auroc,0.9972984998728706
+family_b_unet_synth_seed44,8e5617f,unet_synth,b,44,val,ece,0.01042711118815587
+family_b_unet_synth_seed44,8e5617f,unet_synth,b,44,test,macro_auroc,0.9863417963134142
+family_b_unet_synth_seed44,8e5617f,unet_synth,b,44,test,ece,0.01860663648694756
+family_b_unet_synth_seed44,8e5617f,unet_synth,b,44,all,params,1521668.0
