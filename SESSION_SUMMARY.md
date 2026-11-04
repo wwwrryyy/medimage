@@ -62,4 +62,10 @@ All 10 findings (4 hard glossary/standards violations, 4 architecture/code smell
 
 - **Branch:** `main` (ahead of `origin/main` by 2 commits: `23a43f0`, `4883d95`)
 - **Working Tree:** Clean
-- **Python Environment:** `/tmp/ml_venv` (Python 3.13 + Torch + Torchvision + ONNX + ONNX Runtime + OpenCV + Pytest)
+- **Python Environment:** `/opt/homebrew/Caskroom/miniforge/base/envs/medimg` (Python 3.11 + PyTorch + Torchvision + ONNX + ONNX Runtime + OpenCV + Pytest)
+
+---
+
+## 5. Subsequent Sessions
+- **November 1, 2026 (Milestones 2–5 Pre-Registered Experimentation)**: Documented in [`SESSION_SUMMARY_2026-11-01.md`](SESSION_SUMMARY_2026-11-01.md) and [`EXPERIMENT_RESULTS.md`](EXPERIMENT_RESULTS.md).
+

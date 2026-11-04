@@ -1,0 +1,14 @@
+run_id: "family_b_raw_seed42"
+front_end: "raw"
+family: "b"
+seed: 42
+data:
+  splits_dir: "data/splits"
+  raw_root: "data/raw/kermany"
+train:
+  epochs: 15
+  batch_size: 64
+  lr: 0.001
+  scan_size: 256
+checkpoint_path: "experiments/checkpoints/family_b_raw_seed42.pt"
+results_csv: "experiments/results.csv"
