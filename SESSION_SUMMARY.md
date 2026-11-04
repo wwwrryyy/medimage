@@ -68,4 +68,11 @@ All 10 findings (4 hard glossary/standards violations, 4 architecture/code smell
 
 ## 5. Subsequent Sessions
 - **November 1, 2026 (Milestones 2–5 Pre-Registered Experimentation)**: Documented in [`SESSION_SUMMARY_2026-11-01.md`](SESSION_SUMMARY_2026-11-01.md) and [`EXPERIMENT_RESULTS.md`](EXPERIMENT_RESULTS.md).
+- **November 4, 2026 (Experiment Grid Completion, Conformal Prediction, and Clinical Pipeline CLI)**:
+  - Completed all pre-registered learned front-end arms across both downstream architectures (Family A MIL and Family B Unified Scan) and all 3 random seeds: `raw`, `unet_n2n`, `unet_synth`, and `nlm`.
+  - Added formal pre-registration deviation log in [`EXPERIMENT_PLAN.md`](EXPERIMENT_PLAN.md) detailing BM3D computational constraints and role as an inference benchmark.
+  - Implemented Split Conformal Prediction and clinical referral triage in [`models/classifier/conformal.py`](models/classifier/conformal.py), guaranteeing $\ge 95\%$ sensitivity for detecting pathological findings.
+  - Built unified end-to-end clinical CLI [`scripts/run_pipeline.py`](scripts/run_pipeline.py) executing 3-stage ONNX pipeline, anomaly overlay rendering, and offline SHARP SQLite telemetry logging.
+  - Expanded automated test suite to 66 passed tests (`tests/test_conformal.py`, `tests/test_pipeline_cli.py`).
+
 
