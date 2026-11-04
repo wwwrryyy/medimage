@@ -70,5 +70,6 @@ The C++ engine, SHARP offline logging and HIPAA anonymizer are frozen: tests sta
 M0 doc fixes → M1 data → M2 eval harness + baselines on `raw` → M3 despeckler arms incl. N2N → M4 full grid + stats → M5 write-up.
 
 ## Deviations
-_None yet._
+1. **BM3D Training Computation**: Classical BM3D filtering requires ~1,200 ms per frame on CPU (< 1 FPS). Running on-the-fly BM3D across 6,652 training scans for 15 epochs across 6 seeds would require ~199 CPU hours. Per `data_scripts/make_targets.py`, BM3D is therefore retained strictly as an inference-time/val-time restoration and benchmark comparison, while fast Non-Local Means (NLM) serves as the primary classical spatial filtering baseline for full training.
+2. **Kermany Dataset Partition**: Training and evaluation were conducted on a verified patient-isolated 7,770-scan split (with DSU clustering and perceptual dHash deduplication) to eliminate patient leakage while remaining within edge compute constraints.
 
