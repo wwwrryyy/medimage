@@ -1,0 +1,14 @@
+run_id: "family_a_unet_synth_seed44"
+front_end: "unet_synth"
+family: "a"
+seed: 44
+data:
+  splits_dir: "data/splits"
+  raw_root: "data/raw/kermany"
+train:
+  epochs: 15
+  batch_size: 64
+  lr: 0.001
+  scan_size: 256
+checkpoint_path: "experiments/checkpoints/family_a_unet_synth_seed44.pt"
+results_csv: "experiments/results.csv"
